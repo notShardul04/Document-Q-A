@@ -1,5 +1,6 @@
 import os
 import requests
+import fitz  # PyMuPDF
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -32,6 +33,36 @@ def download_pdfs():
         downloaded_paths[doc_name] = pdf_path
     return downloaded_paths
 
+def parse_pdf(pdf_path, doc_name):
+    """Extracts pages and text content from a PDF file."""
+    print(f"Parsing {pdf_path}...")
+    doc = fitz.open(pdf_path)
+    pages_data = []
+    for page_num in range(len(doc)):
+        page = doc[page_num]
+        text = page.get_text("text")
+        if text.strip():
+            pages_data.append({
+                "document_name": doc_name,
+                "page_number": page_num + 1,  # 1-indexed for citation
+                "text": text
+            })
+    print(f"Parsed {len(pages_data)} pages from {doc_name}.")
+    return pages_data
+
+def get_local_pdfs():
+    """Finds all PDF files in the DATA_DIR and returns a dictionary of doc_name -> path."""
+    pdf_paths = {}
+    if os.path.exists(DATA_DIR):
+        for filename in os.listdir(DATA_DIR):
+            if filename.lower().endswith(".pdf"):
+                doc_name = os.path.splitext(filename)[0]
+                pdf_paths[doc_name] = os.path.join(DATA_DIR, filename)
+    return pdf_paths
+
 if __name__ == "__main__":
-    print("=== AskMyBook Ingestion Pipeline (Step 1: Download) ===")
+    print("=== AskMyBook Ingestion Pipeline (Step 2: Parsing) ===")
     download_pdfs()
+    local_pdfs = get_local_pdfs()
+    for name, path in local_pdfs.items():
+        parse_pdf(path, name)
