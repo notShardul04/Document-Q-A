@@ -50,6 +50,32 @@ def parse_pdf(pdf_path, doc_name):
     print(f"Parsed {len(pages_data)} pages from {doc_name}.")
     return pages_data
 
+def chunk_text(pages_data, chunk_size=800, overlap=200):
+    """Chunks page text into smaller sliding window segments, maintaining page metadata."""
+    chunks = []
+    for page in pages_data:
+        text = page["text"]
+        doc_name = page["document_name"]
+        page_num = page["page_number"]
+        
+        # Simple sliding window chunking
+        i = 0
+        while i < len(text):
+            chunk = text[i:i + chunk_size].strip()
+            # If the chunk is too short and not the first chunk, skip or append to previous if possible
+            if len(chunk) < 100 and i > 0:
+                break
+                
+            chunks.append({
+                "document_name": doc_name,
+                "page_number": page_num,
+                "text": chunk
+            })
+            i += (chunk_size - overlap)
+            
+    print(f"Created {len(chunks)} chunks total.")
+    return chunks
+
 def get_local_pdfs():
     """Finds all PDF files in the DATA_DIR and returns a dictionary of doc_name -> path."""
     pdf_paths = {}
@@ -61,8 +87,10 @@ def get_local_pdfs():
     return pdf_paths
 
 if __name__ == "__main__":
-    print("=== AskMyBook Ingestion Pipeline (Step 2: Parsing) ===")
+    print("=== AskMyBook Ingestion Pipeline (Step 3: Chunking) ===")
     download_pdfs()
     local_pdfs = get_local_pdfs()
+    all_pages = []
     for name, path in local_pdfs.items():
-        parse_pdf(path, name)
+        all_pages.extend(parse_pdf(path, name))
+    chunks = chunk_text(all_pages)
