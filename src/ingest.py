@@ -2,6 +2,7 @@ import os
 import requests
 import fitz  # PyMuPDF
 from dotenv import load_dotenv
+from google import genai
 
 load_dotenv()
 
@@ -76,6 +77,48 @@ def chunk_text(pages_data, chunk_size=800, overlap=200):
     print(f"Created {len(chunks)} chunks total.")
     return chunks
 
+def get_embeddings(texts):
+    """Fetches dense embeddings for a list of texts using the Gemini API."""
+    import time
+    print("Generating dense embeddings using gemini-embedding-2...")
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY environment variable not set.")
+        
+    client = genai.Client(api_key=api_key)
+    
+    # Let's batch the embedding generation
+    batch_size = 50
+    all_embeddings = []
+    
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i:i + batch_size]
+        print(f"Processing batch {i // batch_size + 1}/{(len(texts) - 1) // batch_size + 1}...")
+        
+        retries = 5
+        delay = 10  # Seconds
+        contents_list = [genai.types.Content(parts=[genai.types.Part(text=t)]) for t in batch]
+        for attempt in range(retries):
+            try:
+                response = client.models.embed_content(
+                    model="gemini-embedding-2",
+                    contents=contents_list
+                )
+                break
+            except Exception as e:
+                if "429" in str(e) and attempt < retries - 1:
+                    print(f"Rate limit hit (429). Retrying in {delay} seconds...")
+                    time.sleep(delay)
+                    delay *= 2
+                else:
+                    raise e
+                    
+        # response.embeddings is a list of ContentEmbedding objects
+        for embedding in response.embeddings:
+            all_embeddings.append(embedding.values)
+            
+    return all_embeddings
+
 def get_local_pdfs():
     """Finds all PDF files in the DATA_DIR and returns a dictionary of doc_name -> path."""
     pdf_paths = {}
@@ -87,10 +130,13 @@ def get_local_pdfs():
     return pdf_paths
 
 if __name__ == "__main__":
-    print("=== AskMyBook Ingestion Pipeline (Step 3: Chunking) ===")
+    print("=== AskMyBook Ingestion Pipeline (Step 4: Embeddings) ===")
     download_pdfs()
     local_pdfs = get_local_pdfs()
     all_pages = []
     for name, path in local_pdfs.items():
         all_pages.extend(parse_pdf(path, name))
     chunks = chunk_text(all_pages)
+    texts = [c["text"] for c in chunks[:5]]
+    embeddings = get_embeddings(texts)
+    print(f"Generated {len(embeddings)} embeddings.")
