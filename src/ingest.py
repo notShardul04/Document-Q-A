@@ -3,11 +3,15 @@ import requests
 import fitz  # PyMuPDF
 from dotenv import load_dotenv
 from google import genai
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams, PointStruct
 
 load_dotenv()
 
 # Configuration
 DATA_DIR = "data"
+DB_DIR = "qdrant_db"
+COLLECTION_NAME = "askmybook"
 
 # Source PDFs to download
 DOCUMENTS = {
@@ -119,6 +123,39 @@ def get_embeddings(texts):
             
     return all_embeddings
 
+def build_vector_db(chunks, embeddings):
+    """Stores text chunks and their embeddings in Qdrant (local file mode)."""
+    os.makedirs(DB_DIR, exist_ok=True)
+    print(f"Connecting to Qdrant local storage at {DB_DIR}...")
+    qdrant_client = QdrantClient(path=DB_DIR)
+    
+    # Recreate the collection if it exists to ensure freshness
+    if qdrant_client.collection_exists(COLLECTION_NAME):
+        print(f"Recreating existing collection: {COLLECTION_NAME}")
+        qdrant_client.delete_collection(COLLECTION_NAME)
+        
+    # gemini-embedding-2 has 3072 dimensions
+    qdrant_client.create_collection(
+        collection_name=COLLECTION_NAME,
+        vectors_config=VectorParams(size=3072, distance=Distance.COSINE)
+    )
+    
+    points = []
+    for idx, (chunk, vector) in enumerate(zip(chunks, embeddings)):
+        points.append(PointStruct(
+            id=idx,
+            vector=vector,
+            payload={
+                "text": chunk["text"],
+                "document_name": chunk["document_name"],
+                "page_number": chunk["page_number"]
+            }
+        ))
+        
+    print(f"Upserting {len(points)} points into Qdrant collection '{COLLECTION_NAME}'...")
+    qdrant_client.upsert(collection_name=COLLECTION_NAME, points=points)
+    print("Vector database built successfully.")
+
 def get_local_pdfs():
     """Finds all PDF files in the DATA_DIR and returns a dictionary of doc_name -> path."""
     pdf_paths = {}
@@ -130,13 +167,14 @@ def get_local_pdfs():
     return pdf_paths
 
 if __name__ == "__main__":
-    print("=== AskMyBook Ingestion Pipeline (Step 4: Embeddings) ===")
+    print("=== AskMyBook Ingestion Pipeline (Step 5: Vector DB) ===")
     download_pdfs()
     local_pdfs = get_local_pdfs()
     all_pages = []
     for name, path in local_pdfs.items():
         all_pages.extend(parse_pdf(path, name))
     chunks = chunk_text(all_pages)
-    texts = [c["text"] for c in chunks[:5]]
+    test_chunks = chunks[:5]
+    texts = [c["text"] for c in test_chunks]
     embeddings = get_embeddings(texts)
-    print(f"Generated {len(embeddings)} embeddings.")
+    build_vector_db(test_chunks, embeddings)
