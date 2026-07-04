@@ -1,10 +1,12 @@
 import os
+import pickle
 import requests
 import fitz  # PyMuPDF
 from dotenv import load_dotenv
 from google import genai
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
+from rank_bm25 import BM25Okapi
 
 load_dotenv()
 
@@ -12,6 +14,7 @@ load_dotenv()
 DATA_DIR = "data"
 DB_DIR = "qdrant_db"
 COLLECTION_NAME = "askmybook"
+BM25_PATH = os.path.join(DB_DIR, "bm25_index.pkl")
 
 # Source PDFs to download
 DOCUMENTS = {
@@ -123,6 +126,7 @@ def get_embeddings(texts):
             
     return all_embeddings
 
+
 def build_vector_db(chunks, embeddings):
     """Stores text chunks and their embeddings in Qdrant (local file mode)."""
     os.makedirs(DB_DIR, exist_ok=True)
@@ -156,6 +160,18 @@ def build_vector_db(chunks, embeddings):
     qdrant_client.upsert(collection_name=COLLECTION_NAME, points=points)
     print("Vector database built successfully.")
 
+def build_bm25_index(chunks):
+    """Builds and serializes a BM25 index on the text chunks for sparse retrieval."""
+    print("Building BM25 index...")
+    # Tokenize by simple splitting for BM25
+    tokenized_corpus = [chunk["text"].lower().split() for chunk in chunks]
+    bm25 = BM25Okapi(tokenized_corpus)
+    
+    # Save the index and the raw chunks together
+    with open(BM25_PATH, "wb") as f:
+        pickle.dump({"bm25": bm25, "chunks": chunks}, f)
+    print(f"BM25 index saved to {BM25_PATH}.")
+
 def get_local_pdfs():
     """Finds all PDF files in the DATA_DIR and returns a dictionary of doc_name -> path."""
     pdf_paths = {}
@@ -166,15 +182,34 @@ def get_local_pdfs():
                 pdf_paths[doc_name] = os.path.join(DATA_DIR, filename)
     return pdf_paths
 
-if __name__ == "__main__":
-    print("=== AskMyBook Ingestion Pipeline (Step 5: Vector DB) ===")
+def run_pipeline():
+    """Runs the entire ingestion and indexing pipeline."""
+    print("=== AskMyBook Ingestion Pipeline ===")
+    
+    # 1. Download documents
     download_pdfs()
+    
+    # 2. Find all local PDFs in DATA_DIR
     local_pdfs = get_local_pdfs()
+    print(f"Found {len(local_pdfs)} PDFs to ingest: {list(local_pdfs.keys())}")
+    
+    # 3. Parse PDFs
     all_pages = []
-    for name, path in local_pdfs.items():
-        all_pages.extend(parse_pdf(path, name))
+    for doc_name, pdf_path in local_pdfs.items():
+        all_pages.extend(parse_pdf(pdf_path, doc_name))
+        
+    # 4. Chunk text
     chunks = chunk_text(all_pages)
-    test_chunks = chunks[:5]
-    texts = [c["text"] for c in test_chunks]
+    
+    # 5. Generate embeddings
+    texts = [c["text"] for c in chunks]
     embeddings = get_embeddings(texts)
-    build_vector_db(test_chunks, embeddings)
+    
+    # 6. Build DBs
+    build_vector_db(chunks, embeddings)
+    build_bm25_index(chunks)
+    
+    print("=== Pipeline Complete! Data is ready for retrieval. ===")
+
+if __name__ == "__main__":
+    run_pipeline()
