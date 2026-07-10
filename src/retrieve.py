@@ -100,11 +100,62 @@ def sparse_retrieve(query_text, limit=20, doc_filter=None):
     scored_chunks.sort(key=lambda x: x["score"], reverse=True)
     return scored_chunks[:limit]
 
+def reciprocal_rank_fusion(dense_results, sparse_results, k=60, top_n=5):
+    """Merges two ranked lists using Reciprocal Rank Fusion (RRF)."""
+    rrf_scores = {}
+    
+    # Helper key to uniquely identify a chunk
+    def get_chunk_key(res):
+        return (res["document_name"], res["page_number"], res["text"])
+    
+    # Store items by key for reconstruction
+    items_by_key = {}
+    
+    # Process dense results
+    for rank, res in enumerate(dense_results):
+        key = get_chunk_key(res)
+        items_by_key[key] = res
+        rrf_scores[key] = rrf_scores.get(key, 0.0) + (1.0 / (k + (rank + 1)))
+        
+    # Process sparse results
+    for rank, res in enumerate(sparse_results):
+        key = get_chunk_key(res)
+        items_by_key[key] = res
+        rrf_scores[key] = rrf_scores.get(key, 0.0) + (1.0 / (k + (rank + 1)))
+        
+    # Sort keys by fusion score
+    sorted_keys = sorted(rrf_scores.keys(), key=lambda x: rrf_scores[x], reverse=True)
+    
+    fused_results = []
+    for key in sorted_keys[:top_n]:
+        res = items_by_key[key]
+        res["rrf_score"] = rrf_scores[key]
+        fused_results.append(res)
+        
+    return fused_results
+
+def retrieve_hybrid(query, top_k=5, doc_filter=None):
+    """Executes hybrid retrieval using Qdrant (dense) and BM25 (sparse), fused by RRF."""
+    # 1. Embed query
+    query_vector = get_query_embedding(query)
+    
+    # 2. Dense search (fetch more candidate docs for fusion)
+    dense_matches = dense_retrieve(query_vector, limit=top_k * 3, doc_filter=doc_filter)
+    
+    # 3. Sparse search
+    sparse_matches = sparse_retrieve(query, limit=top_k * 3, doc_filter=doc_filter)
+    
+    # 4. Merge using Reciprocal Rank Fusion
+    fused_matches = reciprocal_rank_fusion(dense_matches, sparse_matches, top_n=top_k)
+    
+    return fused_matches
+
 if __name__ == "__main__":
+    # Test retrieval
     try:
-        print("Testing Sparse Retrieval...")
-        sparse_res = sparse_retrieve("What are the key parameters of the transformer?", limit=3)
-        for r in sparse_res:
-            print(f"- [{r['document_name']}, p.{r['page_number']}] (Score: {r['score']:.4f})")
+        results = retrieve_hybrid("What are the key parameters of the transformer?", top_k=3)
+        print("Test Retrieval Successful:")
+        for r in results:
+            print(f"- [{r['document_name']}, p.{r['page_number']}] (RRF: {r['rrf_score']:.4f}): {r['text'][:100]}...")
     except Exception as e:
-        print(f"Sparse retrieve failed: {e}")
+        print(f"Retrieval test failed (expected if DB not initialized yet): {e}")
