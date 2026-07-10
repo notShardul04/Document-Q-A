@@ -1,4 +1,5 @@
 import os
+import pickle
 from google import genai
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient
@@ -8,14 +9,26 @@ load_dotenv()
 
 DB_DIR = "qdrant_db"
 COLLECTION_NAME = "askmybook"
+BM25_PATH = os.path.join(DB_DIR, "bm25_index.pkl")
 
+# Cache clients and index
 _qdrant_client = None
+_bm25_index = None
 
 def get_qdrant_client():
     global _qdrant_client
     if _qdrant_client is None:
         _qdrant_client = QdrantClient(path=DB_DIR)
     return _qdrant_client
+
+def get_bm25_index():
+    global _bm25_index
+    if _bm25_index is None:
+        if not os.path.exists(BM25_PATH):
+            raise FileNotFoundError(f"BM25 index not found at {BM25_PATH}. Please run ingest.py first.")
+        with open(BM25_PATH, "rb") as f:
+            _bm25_index = pickle.load(f)
+    return _bm25_index
 
 def get_query_embedding(query):
     """Embeds the search query using gemini-embedding-2."""
@@ -62,12 +75,36 @@ def dense_retrieve(query_vector, limit=20, doc_filter=None):
         })
     return retrieved
 
+def sparse_retrieve(query_text, limit=20, doc_filter=None):
+    """Retrieves top matches using BM25 BM25Okapi scoring."""
+    index_data = get_bm25_index()
+    bm25 = index_data["bm25"]
+    chunks = index_data["chunks"]
+    
+    tokenized_query = query_text.lower().split()
+    scores = bm25.get_scores(tokenized_query)
+    
+    # Associate scores with chunks and index position
+    scored_chunks = []
+    for idx, (chunk, score) in enumerate(zip(chunks, scores)):
+        if doc_filter and chunk["document_name"] != doc_filter:
+            continue
+        scored_chunks.append({
+            "text": chunk["text"],
+            "document_name": chunk["document_name"],
+            "page_number": chunk["page_number"],
+            "score": score
+        })
+        
+    # Sort by score descending
+    scored_chunks.sort(key=lambda x: x["score"], reverse=True)
+    return scored_chunks[:limit]
+
 if __name__ == "__main__":
     try:
-        q_vec = get_query_embedding("What are the key parameters of the transformer?")
-        results = dense_retrieve(q_vec, limit=3)
-        print("Dense retrieval successful:")
-        for r in results:
+        print("Testing Sparse Retrieval...")
+        sparse_res = sparse_retrieve("What are the key parameters of the transformer?", limit=3)
+        for r in sparse_res:
             print(f"- [{r['document_name']}, p.{r['page_number']}] (Score: {r['score']:.4f})")
     except Exception as e:
-        print(f"Dense retrieve failed: {e}")
+        print(f"Sparse retrieve failed: {e}")
