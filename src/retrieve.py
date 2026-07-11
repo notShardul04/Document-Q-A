@@ -1,25 +1,34 @@
 import os
 import pickle
-from google import genai
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue
+
+from sentence_transformers import SentenceTransformer
 
 load_dotenv()
 
 DB_DIR = "qdrant_db"
 COLLECTION_NAME = "askmybook"
 BM25_PATH = os.path.join(DB_DIR, "bm25_index.pkl")
+EMBEDDING_MODEL_NAME = "BAAI/bge-base-en-v1.5"
 
-# Cache clients and index
+# Cache clients, model and index
 _qdrant_client = None
 _bm25_index = None
+_embedding_model = None
 
 def get_qdrant_client():
     global _qdrant_client
     if _qdrant_client is None:
         _qdrant_client = QdrantClient(path=DB_DIR)
     return _qdrant_client
+
+def get_embedding_model():
+    global _embedding_model
+    if _embedding_model is None:
+        _embedding_model = SentenceTransformer(EMBEDDING_MODEL_NAME)
+    return _embedding_model
 
 def get_bm25_index():
     global _bm25_index
@@ -31,16 +40,10 @@ def get_bm25_index():
     return _bm25_index
 
 def get_query_embedding(query):
-    """Embeds the search query using gemini-embedding-2."""
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY is not set.")
-    client = genai.Client(api_key=api_key)
-    response = client.models.embed_content(
-        model="gemini-embedding-2",
-        contents=query
-    )
-    return response.embeddings[0].values
+    """Embeds the search query using local BAAI/bge-base-en-v1.5 model."""
+    model = get_embedding_model()
+    embedding = model.encode(query, normalize_embeddings=True)
+    return embedding.tolist()
 
 def dense_retrieve(query_vector, limit=20, doc_filter=None):
     """Retrieves top matches from Qdrant using vector similarity."""
