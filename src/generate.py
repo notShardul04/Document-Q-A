@@ -48,14 +48,22 @@ Answer:
 """
     
     # 3. Call the generation model
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-        )
-        return response.text
-    except Exception as e:
-        return f"Error during generation: {e}"
+    import time
+    retries = 5
+    delay = 2  # Seconds
+    for attempt in range(retries):
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+            )
+            return response.text
+        except Exception as e:
+            if "429" in str(e) and attempt < retries - 1:
+                time.sleep(delay)
+                delay *= 2
+            else:
+                return f"Error during generation: {e}"
 
 if __name__ == "__main__":
     # Test generation with mock context
