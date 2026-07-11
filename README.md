@@ -71,10 +71,10 @@ The primary objectives of this project are:
 | Programming Language | Python 3.11                    |
 | User Interface       | Streamlit                      |
 | PDF Parsing          | PyMuPDF                        |
-| Embedding Model      | BGE / OpenAI Embeddings        |
-| Vector Database      | ChromaDB                       |
+| Embedding Model      | BAAI/bge-base-en-v1.5 (Sentence Transformers) |
+| Vector Database      | Qdrant (Local Mode)            |
 | Retrieval            | Hybrid Search (Dense + BM25)   |
-| Language Model       | GPT-4o-mini or Open Source LLM |
+| Language Model       | Gemini 2.5 Flash               |
 | Evaluation           | RAGAS / Manual Evaluation      |
 | Version Control      | Git and GitHub                 |
 
@@ -200,12 +200,12 @@ Current Stage: Project Initialization
 
 * [x] Repository created
 * [x] Initial documentation
-* [ ] PDF ingestion pipeline
-* [ ] Document chunking
-* [ ] Embedding generation
-* [ ] Vector database integration
-* [ ] Retrieval pipeline
-* [ ] Question answering
+* [x] PDF ingestion pipeline
+* [x] Document chunking
+* [x] Embedding generation (BAAI/bge-base-en-v1.5)
+* [x] Vector database integration (Qdrant)
+* [x] Retrieval pipeline (Hybrid Dense + Sparse RRF)
+* [x] Question answering (Gemini 2.5 Flash)
 * [ ] Evaluation framework
 * [ ] Deployment
 
