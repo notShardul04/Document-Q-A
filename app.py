@@ -299,7 +299,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Main UI Tabs
-tab_qa, = st.tabs(["🕵️ Q&A Workspace"])
+tab_qa, tab_compare = st.tabs(["🕵️ Q&A Workspace", "⚖️ Compare Two Documents"])
 
 # ----------------- TAB 1: STANDARD Q&A -----------------
 with tab_qa:
@@ -349,3 +349,96 @@ with tab_qa:
                     st.error("No database index found. Please click '⚡ Ingest & Index Documents' in the sidebar first to build the index.")
                 except Exception as e:
                     st.error(f"An error occurred: {e}")
+
+# ----------------- TAB 2: COMPARE TWO DOCUMENTS -----------------
+with tab_compare:
+    st.subheader("Side-by-Side Comparative Analyzer")
+    st.markdown("Select two distinct documents, ask a question, and compare their perspectives/content side-by-side.")
+    
+    col_a, col_b = st.columns(2)
+    doc_keys = list(local_pdfs.keys())
+    
+    with col_a:
+        doc_a = st.selectbox("Select Document A", doc_keys, index=0 if len(doc_keys) > 0 else 0)
+    with col_b:
+        # Default select the second document if available
+        default_idx = 1 if len(doc_keys) > 1 else 0
+        doc_b = st.selectbox("Select Document B", doc_keys, index=default_idx)
+        
+    compare_query = st.text_input(
+        "Ask a comparative question:", 
+        placeholder="e.g. How does document A's methodology differ from document B's?",
+        key="compare_query"
+    )
+    
+    if st.button("⚖️ Compare and Synthesize", key="compare_btn"):
+        if not compare_query.strip():
+            st.warning("Please enter a valid query.")
+        elif doc_a == doc_b:
+            st.warning("Please select two different documents to compare.")
+        else:
+            with st.spinner("Retrieving from both sources and analyzing differences..."):
+                try:
+                    # Retrieve top_k chunks for Doc A
+                    contexts_a = retrieve_hybrid(compare_query, top_k=top_k, doc_filter=doc_a)
+                    # Retrieve top_k chunks for Doc B
+                    contexts_b = retrieve_hybrid(compare_query, top_k=top_k, doc_filter=doc_b)
+                    
+                    # Combine context for LLM response
+                    combined_contexts = contexts_a + contexts_b
+                    
+                    if not combined_contexts:
+                        st.info("No matching contexts found for either document.")
+                    else:
+                        # Custom instructions to enforce comparison
+                        comparison_prompt = (
+                            f"Compare the contents of '{doc_a}' and '{doc_b}' in relation to the query: '{compare_query}'. "
+                            "Highlight differences and similarities, referencing specific page numbers in both documents."
+                        )
+                        
+                        answer = generate_answer(comparison_prompt, combined_contexts)
+                        
+                        # Display Comparative Answer
+                        st.markdown("### Synthesized Comparison")
+                        st.markdown(f'<div class="answer-container">{answer}</div>', unsafe_allow_html=True)
+                        
+                        # Side-by-Side Sources
+                        st.markdown("### Retrieved Source Evidence Side-by-Side")
+                        src_col_a, src_col_b = st.columns(2)
+                        
+                        with src_col_a:
+                            st.markdown(f"#### Sources for `{doc_a}`")
+                            if contexts_a:
+                                for ctx in contexts_a:
+                                    st.markdown(f"""
+                                    <div class="chunk-card">
+                                        <div class="chunk-meta">
+                                            <span><span class="page-badge">Page {ctx['page_number']}</span></span>
+                                            <span class="score-badge">Fusion Score: {ctx.get('rrf_score', 0):.4f}</span>
+                                        </div>
+                                        <div class="chunk-text">"{ctx['text']}"</div>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                            else:
+                                st.info("No sources retrieved for Document A.")
+                                
+                        with src_col_b:
+                            st.markdown(f"#### Sources for `{doc_b}`")
+                            if contexts_b:
+                                for ctx in contexts_b:
+                                    st.markdown(f"""
+                                    <div class="chunk-card">
+                                        <div class="chunk-meta">
+                                            <span><span class="page-badge">Page {ctx['page_number']}</span></span>
+                                            <span class="score-badge">Fusion Score: {ctx.get('rrf_score', 0):.4f}</span>
+                                        </div>
+                                        <div class="chunk-text">"{ctx['text']}"</div>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                            else:
+                                st.info("No sources retrieved for Document B.")
+                                
+                except FileNotFoundError:
+                    st.error("No database index found. Please click '⚡ Ingest & Index Documents' in the sidebar first to build the index.")
+                except Exception as e:
+                    st.error(f"An error occurred during comparison: {e}")
