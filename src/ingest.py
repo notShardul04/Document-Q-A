@@ -3,9 +3,9 @@ import pickle
 import requests
 import fitz  # PyMuPDF
 from dotenv import load_dotenv
-from google import genai
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
+from sentence_transformers import SentenceTransformer
 from rank_bm25 import BM25Okapi
 
 load_dotenv()
@@ -15,6 +15,8 @@ DATA_DIR = "data"
 DB_DIR = "qdrant_db"
 COLLECTION_NAME = "askmybook"
 BM25_PATH = os.path.join(DB_DIR, "bm25_index.pkl")
+EMBEDDING_MODEL_NAME = "BAAI/bge-base-en-v1.5"
+VECTOR_SIZE = 768
 
 # Source PDFs to download
 DOCUMENTS = {
@@ -85,46 +87,11 @@ def chunk_text(pages_data, chunk_size=800, overlap=200):
     return chunks
 
 def get_embeddings(texts):
-    """Fetches dense embeddings for a list of texts using the Gemini API."""
-    import time
-    print("Generating dense embeddings using gemini-embedding-2...")
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY environment variable not set.")
-        
-    client = genai.Client(api_key=api_key)
-    
-    # Let's batch the embedding generation
-    batch_size = 50
-    all_embeddings = []
-    
-    for i in range(0, len(texts), batch_size):
-        batch = texts[i:i + batch_size]
-        print(f"Processing batch {i // batch_size + 1}/{(len(texts) - 1) // batch_size + 1}...")
-        
-        retries = 5
-        delay = 10  # Seconds
-        contents_list = [genai.types.Content(parts=[genai.types.Part(text=t)]) for t in batch]
-        for attempt in range(retries):
-            try:
-                response = client.models.embed_content(
-                    model="gemini-embedding-2",
-                    contents=contents_list
-                )
-                break
-            except Exception as e:
-                if "429" in str(e) and attempt < retries - 1:
-                    print(f"Rate limit hit (429). Retrying in {delay} seconds...")
-                    time.sleep(delay)
-                    delay *= 2
-                else:
-                    raise e
-                    
-        # response.embeddings is a list of ContentEmbedding objects
-        for embedding in response.embeddings:
-            all_embeddings.append(embedding.values)
-            
-    return all_embeddings
+    """Fetches dense embeddings for a list of texts using local open-source BAAI/bge-base-en-v1.5 model."""
+    print(f"Generating dense embeddings using {EMBEDDING_MODEL_NAME}...")
+    model = SentenceTransformer(EMBEDDING_MODEL_NAME)
+    embeddings = model.encode(texts, show_progress_bar=True, normalize_embeddings=True)
+    return embeddings.tolist()
 
 
 def build_vector_db(chunks, embeddings):
@@ -138,10 +105,10 @@ def build_vector_db(chunks, embeddings):
         print(f"Recreating existing collection: {COLLECTION_NAME}")
         qdrant_client.delete_collection(COLLECTION_NAME)
         
-    # gemini-embedding-2 has 3072 dimensions
+    # BAAI/bge-base-en-v1.5 has 768 dimensions
     qdrant_client.create_collection(
         collection_name=COLLECTION_NAME,
-        vectors_config=VectorParams(size=3072, distance=Distance.COSINE)
+        vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE)
     )
     
     points = []
